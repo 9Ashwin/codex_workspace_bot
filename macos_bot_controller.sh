@@ -106,7 +106,7 @@ write_plist() {
     printf '%s\n' '  <key>ProgramArguments</key><array>' "    <string>$runner_xml</string>" '  </array>'
     printf '%s\n' '  <key>WorkingDirectory</key>' "  <string>$root_xml</string>"
     printf '%s\n' '  <key>RunAtLoad</key><true/>'
-    printf '%s\n' '  <key>KeepAlive</key><false/>'
+    printf '%s\n' '  <key>KeepAlive</key><true/>'
     printf '%s\n' '  <key>ProcessType</key><string>Background</string>'
     printf '%s\n' '  <key>ThrottleInterval</key><integer>10</integer>'
     printf '%s\n' '  <key>StandardOutPath</key>' "  <string>$stdout_xml</string>"

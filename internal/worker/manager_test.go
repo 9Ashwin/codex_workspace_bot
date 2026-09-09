@@ -17,6 +17,7 @@ type fakeOutput struct {
 	texts             int
 	textBody          []string
 	updateErr         error
+	zonesErr          error
 	companionOutcomes []worker.CompanionSendResult
 	zones             []struct {
 		final, progress, summary string
@@ -103,7 +104,46 @@ func (f *fakeOutput) UpdateBatchCardZones(_ context.Context, _ string, final, pr
 		final, progress, summary string
 		closed                   bool
 	}{final: final, progress: progress, summary: summary, closed: closed})
-	return nil
+	return f.zonesErr
+}
+
+func TestPresentationFailureFallsBackToFinalText(t *testing.T) {
+	output := &fakeOutput{zonesErr: errors.New("card update rejected")}
+	lifecycle := &fakeLifecycle{}
+	manager := worker.NewManager(worker.Config{}, func(worker.Batch) (worker.Output, error) { return output, nil }, func(_ context.Context, batch worker.Batch) (worker.ProcessResult, error) {
+		batch.OnItem(worker.PresentationItem{ID: "final-1", Type: "agentMessage", Phase: "final_answer", Text: "answer"})
+		return worker.ProcessResult{DurationMS: 1}, nil
+	}, lifecycle)
+	defer manager.Close()
+	key := worker.GroupKey("oc_group", "app-a")
+	if err := manager.Accept(context.Background(), testMessage(key, "m-presentation", "question")); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.After(time.Second)
+	for {
+		output.mu.Lock()
+		texts := output.texts
+		var body string
+		if len(output.textBody) > 0 {
+			body = output.textBody[0]
+		}
+		output.mu.Unlock()
+		lifecycle.mu.Lock()
+		completed := len(lifecycle.completed)
+		failures := len(lifecycle.failureCodes)
+		lifecycle.mu.Unlock()
+		if texts == 1 {
+			if body != "answer" || completed != 1 || failures != 0 {
+				t.Fatalf("fallback state: body=%q completed=%d failures=%d", body, completed, failures)
+			}
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("presentation fallback did not send text: texts=%d", texts)
+		case <-time.After(time.Millisecond):
+		}
+	}
 }
 
 func TestManagerProjectsCompletedItemsIntoSeparateWorkCardZones(t *testing.T) {

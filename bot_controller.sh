@@ -2,6 +2,10 @@
 set -euo pipefail
 
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+if [[ $(uname -s) == Darwin ]]; then
+  exec "$ROOT/macos_bot_controller.sh" "$@"
+fi
+
 RUNTIME_DIR="$ROOT/runtime"
 BINARY="$RUNTIME_DIR/codex_workspace_bot"
 CONFIG="$ROOT/config.yaml"

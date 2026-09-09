@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/url"
 	"os"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -105,6 +107,7 @@ type Sender struct {
 	defaultDocFolderToken string
 	mu                    sync.Mutex
 	cards                 map[string]*cardSession
+	imageKeys             map[string]string
 }
 
 var feishuSubcodePattern = regexp.MustCompile(`(?:ErrCode|err_code)\s*[:=]\s*(\d+)`)
@@ -176,7 +179,7 @@ func NewSender(appID, appSecret string, defaultDocFolderToken ...string) *Sender
 	if len(defaultDocFolderToken) > 0 {
 		folder = defaultDocFolderToken[0]
 	}
-	return &Sender{appID: appID, client: lark.NewClient(appID, appSecret), defaultDocFolderToken: folder, cards: make(map[string]*cardSession)}
+	return &Sender{appID: appID, client: lark.NewClient(appID, appSecret), defaultDocFolderToken: folder, cards: make(map[string]*cardSession), imageKeys: make(map[string]string)}
 }
 
 // Download retrieves a resource only when invoked by the owning channel
@@ -211,6 +214,8 @@ func (s *Sender) disableCardKit() {
 func (s *Sender) SendText(ctx context.Context, receiveID, receiveType, text string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
+	prepared, imageKeys := s.prepareLocalImages(ctx, text)
+	text = stripUploadedImagesForText(prepared, imageKeys)
 	content, err := json.Marshal(map[string]string{"text": text})
 	if err != nil {
 		return "", fmt.Errorf("marshal text: %w", err)
@@ -231,6 +236,11 @@ func (s *Sender) SendText(ctx context.Context, receiveID, receiveType, text stri
 	}
 	if resp.Data == nil || resp.Data.MessageId == nil {
 		return "", errors.New("create feishu message: missing message id")
+	}
+	for _, imageKey := range imageKeys {
+		if _, err := s.sendImageKey(ctx, receiveID, receiveType, imageKey); err != nil {
+			slog.Warn("feishu_local_image_send_failed", "event", "feishu_local_image_send_failed", "error", err)
+		}
 	}
 	return *resp.Data.MessageId, nil
 }
@@ -350,6 +360,21 @@ func (s *Sender) UploadAndSend(ctx context.Context, target worker.ReplyTarget, f
 }
 
 func (s *Sender) uploadImageAndSend(ctx context.Context, target worker.ReplyTarget, file *os.File) (string, string, error) {
+	imageKey, err := s.uploadImageKey(ctx, file)
+	if err != nil {
+		return "", "", err
+	}
+	messageID, err := s.sendImageKey(ctx, target.ID, target.Type, imageKey)
+	if err != nil {
+		return "", "", err
+	}
+	return imageKey, messageID, nil
+}
+
+func (s *Sender) uploadImageKey(ctx context.Context, file *os.File) (string, error) {
+	if file == nil {
+		return "", errors.New("image file is nil")
+	}
 	imageType := larkim.CreateImageImageTypeMessage
 	startedAt := time.Now()
 	upload, err := s.client.Im.V1.Image.Create(ctx, larkim.NewCreateImageReqBuilder().Body(larkim.NewCreateImageReqBodyBuilder().ImageType(imageType).Image(file).Build()).Build())
@@ -359,29 +384,33 @@ func (s *Sender) uploadImageAndSend(ctx context.Context, target worker.ReplyTarg
 		s.logFeishuAPICall("im.image.create", startedAt, nil, err)
 	}
 	if err != nil {
-		return "", "", fmt.Errorf("upload feishu image: %w", err)
+		return "", fmt.Errorf("upload feishu image: %w", err)
 	}
 	if !upload.Success() || upload.Data == nil || upload.Data.ImageKey == nil {
-		return "", "", fmt.Errorf("upload feishu image: code=%d", upload.Code)
+		return "", fmt.Errorf("upload feishu image: code=%d", upload.Code)
 	}
-	content, err := json.Marshal(map[string]string{"image_key": *upload.Data.ImageKey})
+	return *upload.Data.ImageKey, nil
+}
+
+func (s *Sender) sendImageKey(ctx context.Context, receiveID, receiveType, imageKey string) (string, error) {
+	content, err := json.Marshal(map[string]string{"image_key": imageKey})
 	if err != nil {
-		return "", "", fmt.Errorf("marshal image message: %w", err)
+		return "", fmt.Errorf("marshal image message: %w", err)
 	}
-	startedAt = time.Now()
-	message, err := s.client.Im.Message.Create(ctx, larkim.NewCreateMessageReqBuilder().ReceiveIdType(target.Type).Body(larkim.NewCreateMessageReqBodyBuilder().ReceiveId(target.ID).MsgType(larkim.MsgTypeImage).Content(string(content)).Build()).Build())
+	startedAt := time.Now()
+	message, err := s.client.Im.Message.Create(ctx, larkim.NewCreateMessageReqBuilder().ReceiveIdType(receiveType).Body(larkim.NewCreateMessageReqBodyBuilder().ReceiveId(receiveID).MsgType(larkim.MsgTypeImage).Content(string(content)).Build()).Build())
 	if message != nil {
 		s.logFeishuAPICall("im.message.create.image", startedAt, &message.CodeError, err)
 	} else {
 		s.logFeishuAPICall("im.message.create.image", startedAt, nil, err)
 	}
 	if err != nil {
-		return "", "", fmt.Errorf("send feishu image: %w", err)
+		return "", fmt.Errorf("send feishu image: %w", err)
 	}
 	if !message.Success() || message.Data == nil || message.Data.MessageId == nil {
-		return "", "", fmt.Errorf("send feishu image: code=%d", message.Code)
+		return "", fmt.Errorf("send feishu image: code=%d", message.Code)
 	}
-	return *upload.Data.ImageKey, *message.Data.MessageId, nil
+	return *message.Data.MessageId, nil
 }
 
 // isFeishuMessageImage detects the image formats supported by Feishu's image
@@ -769,6 +798,7 @@ func initialWorkCardProgress(goal bool) string {
 }
 
 func (s *Sender) UpdateBatchCard(ctx context.Context, messageID, content string) error {
+	content, _ = s.prepareLocalImages(ctx, content)
 	card, err := RenderWorkCardJSON(content, "", "已完成", true)
 	if err != nil {
 		return fmt.Errorf("marshal batch update: %w", err)
@@ -777,6 +807,8 @@ func (s *Sender) UpdateBatchCard(ctx context.Context, messageID, content string)
 }
 
 func (s *Sender) UpdateBatchCardZones(ctx context.Context, messageID, final, progress, summary string, closed bool) error {
+	final, _ = s.prepareLocalImages(ctx, final)
+	progress, _ = s.prepareLocalImages(ctx, progress)
 	if s.cardKitAvailable() {
 		if err := s.updateCardKitEntity(ctx, messageID, final, progress, summary, closed); err == nil {
 			return nil
@@ -916,6 +948,109 @@ func (s *Sender) patchCard(ctx context.Context, messageID string, card []byte) e
 
 func (s *Sender) SendBatchText(ctx context.Context, target worker.ReplyTarget, text string) (string, error) {
 	return s.SendText(ctx, target.ID, target.Type, text)
+}
+
+var localImageMarkdownPattern = regexp.MustCompile(`!\[([^\]]*)\]\(([^)]+)\)`)
+
+func (s *Sender) prepareLocalImages(ctx context.Context, markdown string) (string, []string) {
+	if !strings.Contains(markdown, "![") {
+		return markdown, nil
+	}
+	keys := make([]string, 0, 1)
+	seen := make(map[string]struct{})
+	prepared := localImageMarkdownPattern.ReplaceAllStringFunc(markdown, func(match string) string {
+		parts := localImageMarkdownPattern.FindStringSubmatch(match)
+		if len(parts) != 3 {
+			return match
+		}
+		path, ok := localImagePath(parts[2])
+		if !ok {
+			return match
+		}
+		key, ok := s.localImageKey(ctx, path)
+		if !ok {
+			return "*" + parts[1] + "（图片不可用）*"
+		}
+		if _, exists := seen[key]; !exists {
+			keys = append(keys, key)
+			seen[key] = struct{}{}
+		}
+		return "![" + parts[1] + "](" + key + ")"
+	})
+	return prepared, keys
+}
+
+func stripUploadedImagesForText(text string, imageKeys []string) string {
+	if len(imageKeys) == 0 {
+		return text
+	}
+	allowed := make(map[string]struct{}, len(imageKeys))
+	for _, key := range imageKeys {
+		allowed[key] = struct{}{}
+	}
+	return localImageMarkdownPattern.ReplaceAllStringFunc(text, func(match string) string {
+		parts := localImageMarkdownPattern.FindStringSubmatch(match)
+		if len(parts) == 3 {
+			if _, ok := allowed[parts[2]]; ok {
+				if parts[1] != "" {
+					return "[" + parts[1] + "]"
+				}
+				return "[图片]"
+			}
+		}
+		return match
+	})
+}
+
+func localImagePath(reference string) (string, bool) {
+	if strings.HasPrefix(reference, "file://") {
+		parsed, err := url.Parse(reference)
+		if err != nil {
+			return "", false
+		}
+		reference = parsed.Path
+	}
+	if !strings.HasPrefix(reference, "/") {
+		return "", false
+	}
+	path, err := url.PathUnescape(reference)
+	if err != nil {
+		return "", false
+	}
+	return path, true
+}
+
+func (s *Sender) localImageKey(ctx context.Context, path string) (string, bool) {
+	s.mu.Lock()
+	if key := s.imageKeys[path]; key != "" {
+		s.mu.Unlock()
+		return key, true
+	}
+	s.mu.Unlock()
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Size() == 0 || info.Size() > maxFeishuMessageImageBytes {
+		return "", false
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return "", false
+	}
+	defer file.Close()
+	isImage, err := isFeishuMessageImage(file)
+	if err != nil || !isImage {
+		return "", false
+	}
+	key, err := s.uploadImageKey(ctx, file)
+	if err != nil {
+		return "", false
+	}
+	s.mu.Lock()
+	if s.imageKeys == nil {
+		s.imageKeys = make(map[string]string)
+	}
+	s.imageKeys[path] = key
+	s.mu.Unlock()
+	return key, true
 }
 
 func (s *Sender) SendCompanionSegment(ctx context.Context, target worker.ReplyTarget, text string) worker.CompanionSendResult {

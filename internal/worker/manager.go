@@ -898,13 +898,15 @@ func (w *channelWorker) process(parent context.Context, batch Batch) {
 				err = context.Canceled
 			}
 			cancel()
+			var presentationErr error
 			if drainPresentation != nil {
 				if drainErr := drainPresentation(); drainErr != nil && err == nil {
+					presentationErr = drainErr
 					err = drainErr
 				}
 			}
 			durationMS := processResult.DurationMS
-			processorFailed := err != nil
+			processorFailed := err != nil && presentationErr == nil
 			content := "本轮已完成。"
 			if batch.Goal {
 				content = "目标已完成，但未收到可展示的最终摘要；请检查已完成的操作与日志。"
@@ -932,6 +934,15 @@ func (w *channelWorker) process(parent context.Context, batch Batch) {
 				}
 				if w.manager.lifecycle != nil {
 					_ = w.manager.lifecycle.Fail(parent, messageIDs, "worker_timeout_stopped", durationMS)
+				}
+			} else if presentationErr != nil {
+				slog.Warn("batch_presentation_fallback", "event", "batch_presentation_fallback", "batch_id", batch.ID, "channel_key", batch.Key.String())
+				if fallbackID, fallbackErr := output.SendBatchText(parent, batch.Messages[0].Reply, content); fallbackErr == nil {
+					if w.manager.lifecycle != nil {
+						_ = w.manager.lifecycle.Complete(parent, messageIDs, fallbackID, content, durationMS)
+					}
+				} else if w.manager.lifecycle != nil {
+					_ = w.manager.lifecycle.Fail(parent, messageIDs, "presentation_delivery_failed", durationMS)
 				}
 			} else if err != nil {
 				slog.Error("batch_processor_failed", "event", "batch_processor_failed", "batch_id", batch.ID, "channel_key", batch.Key.String(), "error", err)
@@ -968,7 +979,7 @@ func (w *channelWorker) process(parent context.Context, batch Batch) {
 					_ = w.manager.lifecycle.Complete(parent, messageIDs, cardID, content, durationMS)
 				}
 				slog.Info("batch_completed", "batch_id", batch.ID, "channel_key", batch.Key.String(), "batch_size", len(batch.Messages))
-			} else if !processorFailed && !errors.Is(err, context.DeadlineExceeded) && w.manager.lifecycle != nil && err != nil {
+			} else if presentationErr == nil && !processorFailed && !errors.Is(err, context.DeadlineExceeded) && w.manager.lifecycle != nil && err != nil {
 				slog.Error("batch_card_update_failed", "batch_id", batch.ID, "channel_key", batch.Key.String(), "error", err)
 				if fallbackID, fallbackErr := output.SendBatchText(parent, batch.Messages[0].Reply, content); fallbackErr == nil {
 					_ = w.manager.lifecycle.Complete(parent, messageIDs, fallbackID, content, durationMS)

@@ -26,6 +26,35 @@ func TestFeishuAPICallDetailsRedactsMessageAndPreservesDiagnostics(t *testing.T)
 	}
 }
 
+func TestLocalImagePathDecodesFileReferences(t *testing.T) {
+	path, ok := localImagePath("/Users/ashwin/Library/Application%20Support/sticker/emoticons/a.png")
+	if !ok || path != "/Users/ashwin/Library/Application Support/sticker/emoticons/a.png" {
+		t.Fatalf("localImagePath() = %q, %v", path, ok)
+	}
+	if _, ok := localImagePath("https://example.com/a.png"); ok {
+		t.Fatal("remote URL must not be treated as a local image")
+	}
+}
+
+func TestPrepareLocalImagesDoesNotLeakUnavailableLocalPath(t *testing.T) {
+	sender := &Sender{}
+	prepared, keys := sender.prepareLocalImages(context.Background(), "![贴纸](/tmp/codex-missing-sticker.png)")
+	if len(keys) != 0 || strings.Contains(prepared, "/tmp/codex-missing-sticker.png") || !strings.Contains(prepared, "图片不可用") {
+		t.Fatalf("prepared=%q keys=%v", prepared, keys)
+	}
+}
+
+func TestPrepareLocalImagesUsesCachedFeishuImageKey(t *testing.T) {
+	sender := &Sender{imageKeys: map[string]string{"/tmp/sticker.png": "img_v3_sticker"}}
+	prepared, keys := sender.prepareLocalImages(context.Background(), "嗨\n\n![贴纸](/tmp/sticker.png)")
+	if prepared != "嗨\n\n![贴纸](img_v3_sticker)" || len(keys) != 1 || keys[0] != "img_v3_sticker" {
+		t.Fatalf("prepared=%q keys=%v", prepared, keys)
+	}
+	if got := stripUploadedImagesForText(prepared, keys); got != "嗨\n\n[贴纸]" {
+		t.Fatalf("plain text=%q", got)
+	}
+}
+
 type fakePermissionOwnerTransferer struct {
 	documentID  string
 	ownerOpenID string

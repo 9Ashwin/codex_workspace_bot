@@ -155,18 +155,26 @@ grep -Fq 'http://127.0.0.1:9191/readyz' "$fixture/calls.log" || fail "status mus
 
 : >"$fixture/launch.state"
 set +e
-timeout 4 env HOME="$fixture/home" PATH="$fixture/bin:/usr/bin:/bin" FAKE_CALLS="$fixture/calls.log" \
+python3 -c 'import subprocess, sys
+try:
+    sys.exit(subprocess.run(sys.argv[1:], timeout=4).returncode)
+except subprocess.TimeoutExpired:
+    sys.exit(124)
+' env HOME="$fixture/home" PATH="$fixture/bin:/usr/bin:/bin" FAKE_CALLS="$fixture/calls.log" \
   FAKE_LAUNCH_STATE="$fixture/launch.state" FAKE_CURL_MODE=timeout CODEX_WORKSPACE_BOT_START_TIMEOUT_SECONDS=1 \
   "$fixture/macos_bot_controller.sh" restart >"$fixture/restart.out" 2>"$fixture/restart.err"
 restart_status=$?
 set -e
 [[ $restart_status -ne 0 && $restart_status -ne 124 ]] || fail "restart with no HTTP response must fail within its bound"
 grep -Fq 'service did not become ready within 1s' "$fixture/restart.err" || fail "bounded restart must report timeout"
+grep -Fq '<key>RunAtLoad</key><true/>' "$fixture/home/Library/LaunchAgents/com.kid0317.codex-workspace-bot.plist" || fail "service must start at login"
+grep -Fq '<key>KeepAlive</key><true/>' "$fixture/home/Library/LaunchAgents/com.kid0317.codex-workspace-bot.plist" || fail "service must automatically recover after exit"
 ! rg -n '(^|[;[:space:]])(source|\.)[[:space:]].env' "$fixture/runtime/macos_run.sh" || fail "generated runner must not source dotenv"
 grep -Fq 'safedotenv exec --file ./.env' "$fixture/runtime/macos_run.sh" || fail "generated runner must use safe dotenv exec"
 
 # Execute the generated runner with the real data-only loader on both valid and
 # hostile dotenv files. Parent-only secrets must not reach the server process.
+rm "$fixture/runtime/safedotenv"
 go build -o "$fixture/runtime/safedotenv" "$ROOT/cmd/safedotenv"
 cat >"$fixture/runtime/codex_workspace_bot" <<EOF
 #!/usr/bin/env bash

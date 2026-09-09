@@ -118,7 +118,7 @@ macOS 用户不需要 Ubuntu、Multipass 或 Docker。先完成 Codex 登录和�
 ./macos_bot_controller.sh stop
 ```
 
-控制器使用当前登录用户的 `launchd`，凭据仍只保存在本机 `.env`。
+控制器使用当前登录用户的 `launchd`，登录后自动启动，进程退出后自动拉起。关闭终端不影响后台运行；登录前不会启动。环境凭据保存在本机 `.env`，飞书 App Secret 保存在本机 MySQL。
 
 ### Linux / 手工安装
 
@@ -193,7 +193,7 @@ macOS 用户不需要 Ubuntu、Multipass 或 Docker。先完成 Codex 登录和�
 
 ## 运行控制
 
-Linux 本地服务使用仓库根目录的 `bot_controller.sh` 管理：
+本地服务统一使用仓库根目录的 `bot_controller.sh` 管理；macOS 自动转发到原生 launchd 控制器：
 
 ```bash
 ./bot_controller.sh build
