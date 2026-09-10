@@ -74,3 +74,42 @@ func TestDeliverResultUsesLedgerAcrossBridgeInstances(t *testing.T) {
 		t.Fatalf("ledger did not suppress duplicate: %q", sender.text)
 	}
 }
+
+func TestDeliverNoticeUsesExplicitTargetRoute(t *testing.T) {
+	sender := &fakeSender{}
+	bridge := New(nil, nil, map[string]Sender{"app-2": sender}, nil)
+	notice := fleetq.Message{ID: "request-1:notice:mac-mini", Text: "target update", Meta: map[string]any{
+		"request_id": "request-1",
+		"reply":      map[string]any{"app_id": "app-2", "receive_id": "oc-target", "receive_type": "chat_id"},
+	}}
+	if err := bridge.deliverNotice(context.Background(), notice); err != nil {
+		t.Fatal(err)
+	}
+	if sender.receiveID != "oc-target" || sender.receiveType != "chat_id" || sender.text != "target update" {
+		t.Fatalf("sender=%#v", sender)
+	}
+	if err := bridge.deliverNotice(context.Background(), notice); err != nil {
+		t.Fatal(err)
+	}
+	if sender.text != "target update" {
+		t.Fatalf("duplicate notice was sent: %q", sender.text)
+	}
+}
+
+func TestResultMessageUsesRequestIDAndExecutor(t *testing.T) {
+	bridge := &Bridge{machine: "mac-mini"}
+	message, err := bridge.resultMessage(fleetq.Message{
+		ID:   "message-1",
+		From: "mac-air",
+		Meta: map[string]any{"request_id": "request-1", "reply": map[string]any{"app_id": "app-1"}},
+	}, "done", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if message.ID != "request-1:result" || message.From != "mac-mini" || message.To[0] != "mac-air" {
+		t.Fatalf("result=%#v", message)
+	}
+	if message.Meta["status"] != fleetq.StatusCompleted || message.Meta["executor"] != "mac-mini" {
+		t.Fatalf("result meta=%#v", message.Meta)
+	}
+}

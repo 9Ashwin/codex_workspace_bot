@@ -59,6 +59,7 @@ type TaskSpec struct {
 	Timeout int
 	Sandbox string
 	Reply   ReplyRoute
+	Notify  *NotifyRoute
 }
 
 type Client struct {
@@ -121,6 +122,9 @@ func New(cfg Config) (*Client, error) {
 
 func (c *Client) Close() { c.conn.Close() }
 
+// Machine returns the stable machine name used by this client.
+func (c *Client) Machine() string { return c.cfg.Machine }
+
 func (c *Client) Publish(ctx context.Context, message Message) error {
 	select {
 	case <-ctx.Done():
@@ -169,6 +173,24 @@ func (c *Client) Publish(ctx context.Context, message Message) error {
 	return nil
 }
 
+func (c *Client) PublishStatus(ctx context.Context, event StatusEvent) error {
+	if event.RequestID == "" || event.MessageID == "" || event.Machine == "" || event.Status == "" {
+		return errors.New("fleetq status event identity is required")
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		return fmt.Errorf("marshal fleetq status event: %w", err)
+	}
+	msgID := "status:" + event.RequestID + ":" + event.Machine + ":" + event.Status
+	if _, err := c.js.Publish(EventsSubject, data, nats.MsgId(msgID), nats.ExpectStream(EventsStream), nats.Context(ctx)); err != nil {
+		return fmt.Errorf("publish fleetq status event: %w", err)
+	}
+	if err := c.conn.FlushWithContext(ctx); err != nil {
+		return fmt.Errorf("flush fleetq status event: %w", err)
+	}
+	return nil
+}
+
 func (c *Client) PublishTask(ctx context.Context, spec TaskSpec) (Message, error) {
 	if strings.TrimSpace(spec.Text) == "" {
 		return Message{}, errors.New("fleetq task text is required")
@@ -186,14 +208,16 @@ func (c *Client) PublishTask(ctx context.Context, spec TaskSpec) (Message, error
 	if err != nil {
 		return Message{}, err
 	}
-	message := Message{Schema: Schema, ID: id, From: c.cfg.Machine, To: append([]string(nil), spec.To...), Kind: "job.request", Text: spec.Text, CreatedAt: time.Now().Format(time.RFC3339), Meta: map[string]any{
+	message := Message{Schema: Schema, ID: id, From: c.cfg.Machine, To: append([]string(nil), spec.To...), Kind: KindJobRequest, Text: spec.Text, CreatedAt: time.Now().Format(time.RFC3339), Meta: map[string]any{
 		"action": "codex.prompt", "cwd": spec.CWD, "sandbox": spec.Sandbox, "timeout_s": spec.Timeout,
-		"reply": spec.Reply,
+		"request_id": id, "status": StatusAccepted, "reply": spec.Reply,
 	}}
+	if spec.Notify != nil {
+		message.Meta["notify"] = *spec.Notify
+	}
 	if spec.Model != "" {
 		message.Meta["model"] = spec.Model
 	}
-	message.Meta["request_id"] = message.ID
 	if err := c.Publish(ctx, message); err != nil {
 		return Message{}, err
 	}

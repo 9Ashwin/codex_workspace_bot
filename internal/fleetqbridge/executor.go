@@ -13,16 +13,19 @@ import (
 	"github.com/kid0317/codex-workspace-bot/internal/worker"
 )
 
+// CodexExecutor adapts a FleetQ request to the existing Codex App Server.
 type CodexExecutor struct {
 	processor *codexapp.Processor
 	threads   *threadStore
 }
 
+// NewCodexExecutor creates an executor backed by a shared Codex runtime.
 func NewCodexExecutor(runtime *codexapp.Runtime) *CodexExecutor {
 	threads := &threadStore{threads: make(map[string]string)}
 	return &CodexExecutor{processor: &codexapp.Processor{Runtime: runtime, Store: threads}, threads: threads}
 }
 
+// Execute runs a FleetQ request in its requested workspace.
 func (e *CodexExecutor) Execute(ctx context.Context, message fleetq.Message) (string, error) {
 	meta := message.Meta
 	cwd := expandWorkspacePath(stringValue(meta, "cwd"))

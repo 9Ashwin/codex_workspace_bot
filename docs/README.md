@@ -12,5 +12,7 @@
 8. [Story 设计文档](story/)：每个 Story 的目标、范围、设计和验收标准。
 9. [Story 交付 SOP](sop/story-design-to-delivery.md)：维护者继续开发 Story 时使用的流程约定。
 10. [开源安全清单](open-source-readiness.md)：说明哪些文件可开源、哪些只能保留本地，以及提交前检查方法。
+11. [FleetQ Linux Hermes 接入](FLEETQ-HERMES.md)：说明独立 Linux Hermes 消费者的编译、配置和 handler 合同。
+12. [FleetQ 协议](PROTOCOL.md)：说明任务、结果、通知和生命周期状态的消息合同。
 
 历史复盘、评审报告、过期设计和 agent 执行计划已移动到 [archive/](archive/)。这些文件用于追溯设计取舍，不是新读者理解项目的入口。

@@ -21,7 +21,7 @@ func (s *Store) BeginFleetQResult(ctx context.Context, requestID, resultID, appI
 }
 
 func (s *Store) MarkFleetQResultSent(ctx context.Context, requestID string) error {
-	if _, err := s.DB.ExecContext(ctx, `UPDATE fleetq_result_deliveries SET status='sent', error_reason=NULL, sent_at=CURRENT_TIMESTAMP(3), updated_at=CURRENT_TIMESTAMP(3) WHERE request_id=? AND status='pending'`, requestID); err != nil {
+	if _, err := s.DB.ExecContext(ctx, `UPDATE fleetq_result_deliveries SET status='delivered', error_reason=NULL, sent_at=CURRENT_TIMESTAMP(3), updated_at=CURRENT_TIMESTAMP(3) WHERE request_id=? AND status='pending'`, requestID); err != nil {
 		return fmt.Errorf("mark fleetq result sent: %w", err)
 	}
 	return nil

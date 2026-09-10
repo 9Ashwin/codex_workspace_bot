@@ -7,6 +7,7 @@
 /.codex-workspace-bot/
 /graphify-out/
 /tmp/
+.idea/
 *.log
 *.pid
 *.db

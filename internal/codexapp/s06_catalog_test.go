@@ -1,6 +1,7 @@
 package codexapp_test
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -24,9 +25,27 @@ func TestS06DynamicToolsIncludeFeishuAndStrictScheduleSchemas(t *testing.T) {
 	if string(seen["schedule.create"].InputSchema) == "" || string(seen["schedule.create"].InputSchema) == string(seen["schedule.update"].InputSchema) {
 		t.Fatalf("schedule schemas missing or reused: create=%s update=%s", seen["schedule.create"].InputSchema, seen["schedule.update"].InputSchema)
 	}
-	if codexapp.S06ToolCatalogVersion != "s10-fleetq-v1" {
+	if codexapp.S06ToolCatalogVersion != "s10-fleetq-v2" {
 		t.Fatalf("version=%q", codexapp.S06ToolCatalogVersion)
 	}
+}
+
+func TestS06FleetQTaskSchemaExplainsAcceptedAndOptionalNotification(t *testing.T) {
+	for _, tool := range codexapp.S06DynamicTools() {
+		if tool.Namespace == "fleetq" && tool.Name == "task" {
+			schema := string(tool.InputSchema)
+			if !json.Valid(tool.InputSchema) {
+				t.Fatalf("fleetq.task schema is invalid JSON: %s", schema)
+			}
+			for _, want := range []string{"notify", "accepted", "completed", "target Bot"} {
+				if !strings.Contains(schema+tool.Description, want) {
+					t.Fatalf("fleetq.task contract is missing %q: %s", want, schema+tool.Description)
+				}
+			}
+			return
+		}
+	}
+	t.Fatal("fleetq.task schema is missing")
 }
 
 func TestS06UpdateSchemaAcceptsOnlyMatchingListedTaskKind(t *testing.T) {

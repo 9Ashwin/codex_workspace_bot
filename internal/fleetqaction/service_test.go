@@ -3,6 +3,7 @@ package fleetqaction
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/kid0317/codex-workspace-bot/internal/codexapp"
@@ -27,5 +28,24 @@ func TestExecutePublishesFullAccessTaskWithReplyRoute(t *testing.T) {
 	}
 	if publisher.spec.Sandbox != "danger-full-access" || publisher.spec.Reply.AppID != "app-1" || publisher.spec.Reply.ReceiveID != "ou-user" {
 		t.Fatalf("published spec=%#v", publisher.spec)
+	}
+}
+
+func TestExecuteReturnsAcceptedStatusAndOptionalNotifyRoute(t *testing.T) {
+	publisher := &fakePublisher{}
+	service := Service{Publisher: publisher}
+	arguments, _ := json.Marshal(map[string]any{
+		"to": "mac-mini", "cwd": "/tmp/work", "text": "run tests",
+		"notify_target": true,
+	})
+	result, err := service.Execute(context.Background(), Route{AppID: "app-1", Reply: worker.ReplyTarget{ID: "ou-user", Type: "open_id"}}, codexapp.ToolCall{Arguments: arguments})
+	if err != nil || !result.Success {
+		t.Fatalf("Execute() result=%#v err=%v", result, err)
+	}
+	if publisher.spec.Notify == nil || publisher.spec.Notify.Machine != "mac-mini" || publisher.spec.Notify.Reply.ReceiveID != "ou-user" {
+		t.Fatalf("published notify route=%#v", publisher.spec.Notify)
+	}
+	if len(result.ContentItems) != 1 || result.ContentItems[0].Text == "" || !strings.Contains(result.ContentItems[0].Text, `"status":"accepted"`) {
+		t.Fatalf("accepted result=%#v", result)
 	}
 }

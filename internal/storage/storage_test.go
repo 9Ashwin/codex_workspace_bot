@@ -108,3 +108,20 @@ func TestS10MigrationDefinesFleetQResultDeliveryLedger(t *testing.T) {
 		}
 	}
 }
+
+func TestS10MigrationRenamesFleetQDeliveryState(t *testing.T) {
+	body, err := os.ReadFile("../../migrations/012_fleetq_delivered_status.sql")
+	if err != nil {
+		t.Fatalf("read FleetQ delivery migration: %v", err)
+	}
+	for _, required := range []string{
+		"MODIFY status ENUM('pending', 'sent', 'delivered', 'unknown')",
+		"SET status = 'delivered'",
+		"WHERE status = 'sent'",
+		"MODIFY status ENUM('pending', 'delivered', 'unknown')",
+	} {
+		if !strings.Contains(string(body), required) {
+			t.Fatalf("FleetQ delivery migration missing %q", required)
+		}
+	}
+}

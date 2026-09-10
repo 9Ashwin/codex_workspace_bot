@@ -168,6 +168,18 @@ codex-workspace-bot (Go 主进程)
 
 **Docker 发行补充裁决（2026-08-16）**：上面的“独占、唯一、由 Bot 生命周期管理”合同不变，但为了避免 `danger-full-access` Agent 继承或读取 Bot Secret，允许 Bot 的 stdio child 是最小环境的 `codex-remote`。它经隔离 control network 连接独立 Codex 容器中的 byte-transparent `codex-bridge`，由 bridge 独占拉起唯一 App Server。bridge 不理解 JSON-RPC、不持久化、不复用外部 daemon、拒绝第二个并发 client；Bot 的 `initialize`、generation、恢复和“不自动重放”语义全部保持不变。Provider API Key 另由只连接 model network 的固定上游 proxy 持有；它不是 App Server proxy，Codex 只看到无价值的占位 token。Bot、Codex、Provider proxy、MySQL 四个服务不得互相继承整套环境或挂载 `.secrets`。
 
+### 3.3 FleetQ 跨节点异步协作
+
+FleetQ/NATS 是独立的任务编排边界，不嵌入 NATS Server 到 Bot，也不要求每个节点都运行
+Codex。Bot 节点由 `internal/fleetqbridge` 复用本机 Codex App Server；Linux Hermes
+节点由 `cmd/fleetq-hermes` 调用本机 handler。`fleetq.task` 只确认 `accepted`，结果
+路径必须区分执行完成和飞书 `delivered`；发起方的 `reply` 路由是默认回执位置，目标机
+通知只能通过显式 `notify → job.notice` 开启。
+
+任务结果和飞书投递分别幂等：JetStream 以消息 ID/lease 控制任务重投，发起 Bot 的
+`fleetq_result_deliveries` 记录结果发送状态，`job.status` 事件写入 `FLEETQ_EVENTS`
+供状态观察。通知失败不重新执行原任务。
+
 ---
 
 ## 4. 消息处理流程
@@ -802,6 +814,7 @@ S04 companion 每次 Feishu segment API result 后、下一段启动前，必须
 | 附件输入与清理（S05） | attachment/ + storage/ | Worker 下载、retention CAS 清理与本地路径输入 |
 | 飞书文档读取（S05） | feishuaction/ + feishu/ | 仅用当前 App 的 `Docx.Document.RawContent` 读取有效 docx URL，并把正文只交给当前 Codex Turn |
 | 文档 Owner 转移（S05.1） | feishuaction/ + feishu/ | 创建的单篇 docx 转给当前消息发起人；失败仍公告 URL，群聊不以 chat ID 代替 owner |
+| FleetQ 跨节点任务（S10） | fleetq/ + fleetqbridge/ + fleetqhermes/ | NATS JetStream 任务/结果/可选目标通知；明确 accepted/completed/delivered 生命周期 |
 
 ### 12.3 未来功能（P2）
 

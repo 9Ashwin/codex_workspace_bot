@@ -19,6 +19,7 @@
 9. [Turn 对象结构](#9-turn-对象结构)
 10. [关键枚举与类型](#10-关键枚举与类型)
 11. [实现要点与陷阱](#11-实现要点与陷阱)
+12. [FleetQ 异步边界](#12-fleetq-异步边界)
 
 ---
 
@@ -1132,6 +1133,20 @@ func (c *CodexClient) readLoop() {
     }
 }
 ```
+
+## 12. FleetQ 异步边界
+
+FleetQ 不改变 App Server 的 stdio JSON-RPC 协议；它是 Bot 与其他机器之间的异步编排
+边界。`fleetq.task` 的成功只表示 `job.request` 已被 NATS 接受，不能作为 Codex
+执行完成或飞书已送达的证据。
+
+任务状态按 `accepted → claimed → running → completed|failed → delivered` 解释。执行
+机发布 `job.result`，发起机根据其中不可变的 `meta.request_id` 和 `meta.reply` 投递到
+原飞书会话；目标机若需要展示结果，使用显式 `meta.notify` 生成独立 `job.notice`，不
+能让通知失败触发原任务重跑。
+
+该边界要求处理器幂等、允许 JetStream 重投，并把 lease/ack 与飞书发送状态分开记录。
+具体消息字段见仓库内的 [FleetQ 协议](PROTOCOL.md)。
 
 ---
 

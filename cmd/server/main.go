@@ -224,7 +224,7 @@ func main() {
 			}
 		}
 	}
-	if cfg.Schedule.Enabled {
+	if cfg.Schedule.Enabled || cfg.FleetQ.Enabled {
 		processor.ToolCatalogVersion = codexapp.S06ToolCatalogVersion
 	}
 	workflowWriter := worker.WorkflowWriterFunc(func(ctx context.Context, event worker.CompanionWorkflowEvent) error {
