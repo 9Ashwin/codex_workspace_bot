@@ -20,6 +20,7 @@ type Config struct {
 	Streaming     StreamingConfig     `yaml:"streaming"`
 	Attachments   AttachmentsConfig   `yaml:"attachments"`
 	FeishuActions FeishuActionsConfig `yaml:"feishu_actions"`
+	FleetQ        FleetQConfig        `yaml:"fleetq"`
 	Schedule      ScheduleConfig      `yaml:"schedule"`
 	Scripts       ScriptsConfig       `yaml:"scripts"`
 	Observability ObservabilityConfig `yaml:"observability"`
@@ -69,6 +70,16 @@ type FeishuActionsConfig struct {
 	DefaultDocFolderToken string      `yaml:"default_doc_folder_token"`
 	ActionTimeoutSeconds  int         `yaml:"action_timeout_seconds"`
 	ResultKeys            []KeyConfig `yaml:"result_keys"`
+}
+
+type FleetQConfig struct {
+	Enabled         bool   `yaml:"enabled"`
+	Machine         string `yaml:"machine"`
+	NATSURL         string `yaml:"nats_url"`
+	TokenEnv        string `yaml:"token_env"`
+	CredsEnv        string `yaml:"creds_env"`
+	AckWaitSeconds  int    `yaml:"ack_wait_seconds"`
+	FetchWaitMillis int    `yaml:"fetch_wait_millis"`
 }
 
 // ScheduleConfig is disabled by default so existing installations do not
@@ -244,6 +255,18 @@ func applyDefaults(cfg *Config) {
 	if cfg.FeishuActions.ActionTimeoutSeconds == 0 {
 		cfg.FeishuActions.ActionTimeoutSeconds = 20
 	}
+	if cfg.FleetQ.TokenEnv == "" {
+		cfg.FleetQ.TokenEnv = "FLEETQ_NATS_TOKEN"
+	}
+	if cfg.FleetQ.CredsEnv == "" {
+		cfg.FleetQ.CredsEnv = "FLEETQ_NATS_CREDS"
+	}
+	if cfg.FleetQ.AckWaitSeconds == 0 {
+		cfg.FleetQ.AckWaitSeconds = 7200
+	}
+	if cfg.FleetQ.FetchWaitMillis == 0 {
+		cfg.FleetQ.FetchWaitMillis = 1000
+	}
 	if cfg.Schedule.TickIntervalMS == 0 {
 		cfg.Schedule.TickIntervalMS = 1000
 	}
@@ -332,6 +355,14 @@ func validate(cfg *Config) error {
 	}
 	if cfg.FeishuActions.ActionTimeoutSeconds < 1 {
 		return fmt.Errorf("config: feishu_actions action_timeout_seconds must be positive")
+	}
+	if cfg.FleetQ.Enabled {
+		if strings.TrimSpace(cfg.FleetQ.Machine) == "" || strings.TrimSpace(cfg.FleetQ.NATSURL) == "" {
+			return fmt.Errorf("config: fleetq machine and nats_url are required when enabled")
+		}
+		if cfg.FleetQ.AckWaitSeconds < 1 || cfg.FleetQ.FetchWaitMillis < 100 {
+			return fmt.Errorf("config: fleetq timing values are invalid")
+		}
 	}
 	if cfg.FeishuActions.Enabled {
 		if err := loadKeyring("attachments.resource_ref_keys", cfg.Attachments.ResourceRefKeys); err != nil {

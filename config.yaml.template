@@ -43,6 +43,15 @@ feishu_actions:
   result_keys:
     - version: 1
       key_env: "CODEX_WORKSPACE_BOT_ACTION_RESULT_KEY_V1"
+fleetq:
+  # One Bot process consumes FleetQ jobs; NATS Server remains infrastructure.
+  enabled: false
+  machine: ""
+  nats_url: ""
+  token_env: "FLEETQ_NATS_TOKEN"
+  creds_env: "FLEETQ_NATS_CREDS"
+  ack_wait_seconds: 7200
+  fetch_wait_millis: 1000
 schedule:
   # Enable only after both key variables and the S06 migration are present.
   enabled: false

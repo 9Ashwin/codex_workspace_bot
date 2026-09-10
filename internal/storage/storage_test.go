@@ -91,3 +91,20 @@ func TestS10MigrationMakesAttachmentPathsUTF8MB4(t *testing.T) {
 		}
 	}
 }
+
+func TestS10MigrationDefinesFleetQResultDeliveryLedger(t *testing.T) {
+	body, err := os.ReadFile("../../migrations/011_fleetq_result_deliveries.sql")
+	if err != nil {
+		t.Fatalf("read FleetQ migration: %v", err)
+	}
+	for _, required := range []string{
+		"CREATE TABLE IF NOT EXISTS fleetq_result_deliveries",
+		"request_id VARCHAR(191) PRIMARY KEY",
+		"status ENUM('pending', 'sent', 'unknown')",
+		"ix_fleetq_result_deliveries_status",
+	} {
+		if !strings.Contains(string(body), required) {
+			t.Fatalf("FleetQ migration missing %q", required)
+		}
+	}
+}

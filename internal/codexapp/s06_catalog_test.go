@@ -9,14 +9,14 @@ import (
 
 func TestS06DynamicToolsIncludeFeishuAndStrictScheduleSchemas(t *testing.T) {
 	tools := codexapp.S06DynamicTools()
-	if len(tools) != 7 {
-		t.Fatalf("tool count=%d want 7", len(tools))
+	if len(tools) != 8 {
+		t.Fatalf("tool count=%d want 8", len(tools))
 	}
 	seen := make(map[string]codexapp.DynamicTool, len(tools))
 	for _, tool := range tools {
 		seen[tool.Namespace+"."+tool.Name] = tool
 	}
-	for _, name := range []string{"feishu.message_send_current_channel", "feishu.file_upload_and_send_current_channel", "feishu.doc_create_and_announce", "feishu.doc_read", "schedule.list_own", "schedule.create", "schedule.update"} {
+	for _, name := range []string{"feishu.message_send_current_channel", "feishu.file_upload_and_send_current_channel", "feishu.doc_create_and_announce", "feishu.doc_read", "fleetq.task", "schedule.list_own", "schedule.create", "schedule.update"} {
 		if _, ok := seen[name]; !ok {
 			t.Fatalf("missing %s", name)
 		}
@@ -24,7 +24,7 @@ func TestS06DynamicToolsIncludeFeishuAndStrictScheduleSchemas(t *testing.T) {
 	if string(seen["schedule.create"].InputSchema) == "" || string(seen["schedule.create"].InputSchema) == string(seen["schedule.update"].InputSchema) {
 		t.Fatalf("schedule schemas missing or reused: create=%s update=%s", seen["schedule.create"].InputSchema, seen["schedule.update"].InputSchema)
 	}
-	if codexapp.S06ToolCatalogVersion != "s06-schedule-v4" {
+	if codexapp.S06ToolCatalogVersion != "s10-fleetq-v1" {
 		t.Fatalf("version=%q", codexapp.S06ToolCatalogVersion)
 	}
 }

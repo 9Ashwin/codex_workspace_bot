@@ -269,7 +269,7 @@ func TestProcessorNeverResumesOldThreadWhileCatalogUpgradeIsPending(t *testing.T
 		var start struct {
 			DynamicTools []codexapp.DynamicTool `json:"dynamicTools"`
 		}
-		if request.Method != "thread/start" || json.Unmarshal(request.Params, &start) != nil || len(start.DynamicTools) != 7 {
+		if request.Method != "thread/start" || json.Unmarshal(request.Params, &start) != nil || len(start.DynamicTools) != 8 {
 			t.Errorf("catalog start request=%s tools=%d", request.Method, len(start.DynamicTools))
 			return
 		}

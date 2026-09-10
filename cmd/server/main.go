@@ -19,6 +19,9 @@ import (
 	"github.com/kid0317/codex-workspace-bot/internal/config"
 	"github.com/kid0317/codex-workspace-bot/internal/feishu"
 	"github.com/kid0317/codex-workspace-bot/internal/feishuaction"
+	"github.com/kid0317/codex-workspace-bot/internal/fleetq"
+	"github.com/kid0317/codex-workspace-bot/internal/fleetqaction"
+	"github.com/kid0317/codex-workspace-bot/internal/fleetqbridge"
 	projectlog "github.com/kid0317/codex-workspace-bot/internal/logging"
 	"github.com/kid0317/codex-workspace-bot/internal/observability"
 	"github.com/kid0317/codex-workspace-bot/internal/router"
@@ -160,6 +163,24 @@ func main() {
 		downloaders[app.ID] = sender
 		actionClients[app.ID] = sender
 	}
+	var fleetqClient *fleetq.Client
+	var fleetqActions *fleetqaction.Service
+	if cfg.FleetQ.Enabled {
+		fleetqClient, err = fleetq.New(fleetq.Config{
+			Machine: cfg.FleetQ.Machine, NATSURL: cfg.FleetQ.NATSURL,
+			TokenEnv: cfg.FleetQ.TokenEnv, CredsEnv: cfg.FleetQ.CredsEnv,
+			AckWait:   time.Duration(cfg.FleetQ.AckWaitSeconds) * time.Second,
+			FetchWait: time.Duration(cfg.FleetQ.FetchWaitMillis) * time.Millisecond,
+			Machines:  []string{"linux", "mac-mini", "mac-air"},
+		})
+		if err != nil {
+			slog.Error("fleetq_start", "event", "fleetq_start_failed", "error", err)
+			os.Exit(1)
+		}
+		defer fleetqClient.Close()
+		fleetqActions = &fleetqaction.Service{Publisher: fleetqClient}
+		slog.Info("fleetq_connected", "event", "fleetq_connected", "machine", cfg.FleetQ.Machine, "nats_url", cfg.FleetQ.NATSURL)
+	}
 	processor := codexapp.Processor{Runtime: runtime, Store: store, UsageLedger: store, Observability: telemetry}
 	var referenceProtector *attachment.ReferenceProtector
 	var actions *feishuaction.Service
@@ -179,11 +200,17 @@ func main() {
 		actions = &actionService
 	}
 	var scheduleActions *scheduleaction.Service
-	if cfg.FeishuActions.Enabled || cfg.Schedule.Enabled {
+	if cfg.FeishuActions.Enabled || cfg.Schedule.Enabled || cfg.FleetQ.Enabled {
 		processor.ToolHandlers = func(batch worker.Batch) codexapp.ToolHandler {
 			feishuRoute := feishuaction.Route{AppID: batch.Runtime.ID, ChannelKey: batch.Key.String(), ChatGroupID: batch.Messages[0].ChatGroupID, Reply: batch.Messages[0].Reply, OwnerOpenID: batchActorOpenID(batch), WorkspaceDir: batch.Runtime.WorkspaceDir, OutboxDir: batch.Messages[0].AttachmentOutboxDir}
 			scheduleRoute := scheduleaction.Route{AppID: batch.Runtime.ID, ChannelKey: batch.Key.String(), ChatGroupID: batch.Messages[0].ChatGroupID, Actor: batch.Messages[0].Actor}
 			return func(ctx context.Context, call codexapp.ToolCall) (codexapp.ToolResult, error) {
+				if isFleetQTool(call.Tool) {
+					if fleetqActions == nil {
+						return codexapp.ToolResult{Success: false, ContentItems: []codexapp.ToolContentItem{{Type: "inputText", Text: "fleetq is unavailable"}}}, nil
+					}
+					return fleetqActions.Execute(ctx, fleetqaction.Route{AppID: batch.Runtime.ID, ChatType: batch.Messages[0].ChatType, ChatID: batch.Messages[0].ChatID, Reply: batch.Messages[0].Reply}, call)
+				}
 				if isScheduleTool(call.Tool) {
 					if scheduleActions == nil {
 						return codexapp.ToolResult{Success: false, ContentItems: []codexapp.ToolContentItem{{Type: "inputText", Text: "schedule is unavailable"}}}, nil
@@ -226,6 +253,18 @@ func main() {
 	}, processor.Process, lifecycle)
 	manager.SetGoalRunController(runtime)
 	defer manager.Close()
+	if fleetqClient != nil {
+		senders := make(map[string]fleetqbridge.Sender, len(outputs))
+		for appID, sender := range outputs {
+			senders[appID] = sender
+		}
+		bridge := fleetqbridge.New(fleetqClient, fleetqbridge.NewCodexExecutor(runtime), senders, slog.Default(), store)
+		go func() {
+			if bridgeErr := bridge.Run(ctx); bridgeErr != nil && ctx.Err() == nil {
+				slog.Error("fleetq_bridge_stopped", "event", "fleetq_bridge_stopped", "error", bridgeErr)
+			}
+		}()
+	}
 	if cfg.Schedule.Enabled {
 		payloadKeys, ownerKeys, keyErr := scheduleKeyrings(cfg.Schedule)
 		if keyErr != nil {
@@ -350,6 +389,10 @@ func isScheduleTool(tool string) bool {
 	default:
 		return false
 	}
+}
+
+func isFleetQTool(tool string) bool {
+	return tool == "fleetq.task" || tool == "task"
 }
 
 func scheduleKeyrings(cfg config.ScheduleConfig) (schedule.Keyring, schedule.Keyring, error) {

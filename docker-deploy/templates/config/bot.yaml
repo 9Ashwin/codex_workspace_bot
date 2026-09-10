@@ -43,6 +43,14 @@ feishu_actions:
   result_keys:
     - version: 1
       key_env: "CODEX_WORKSPACE_BOT_ACTION_RESULT_KEY_V1"
+fleetq:
+  enabled: false
+  machine: ""
+  nats_url: ""
+  token_env: "FLEETQ_NATS_TOKEN"
+  creds_env: "FLEETQ_NATS_CREDS"
+  ack_wait_seconds: 7200
+  fetch_wait_millis: 1000
 schedule:
   enabled: false
   tick_interval_ms: 1000
@@ -61,4 +69,3 @@ scripts:
 observability:
   langfuse:
     enabled: false
-
